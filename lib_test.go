@@ -221,7 +221,7 @@ func Test_Has(t *testing.T) {
 		t.Errorf("failed to set key: %v", err)
 	}
 
-	if !p.Has("KeyName") {
+	if found, err := p.Has("KeyName"); err != nil || !found {
 		t.Errorf("key not found")
 	}
 }
@@ -239,7 +239,10 @@ func Test_Keys(t *testing.T) {
 		t.Errorf("failed to set key: %v", err)
 	}
 
-	keys := p.Keys()
+	keys, err := p.Keys()
+	if err != nil {
+		t.Errorf("failed to get keys: %v", err)
+	}
 
 	if len(keys) != 2 {
 		t.Errorf("got wrong keys: %v", keys)
@@ -284,53 +287,6 @@ func Test_SaveToDisk(t *testing.T) {
 	}
 
 	assetCacheFileExists(t, "CacheName", "KeyName")
-}
-
-func Test_SetSingleFile(t *testing.T) {
-	t.Cleanup(ClearTestAssets)
-
-	p := pstore.New(TEST_ASSETS_PATH, "CacheName")
-	p.SingleCacheFile = true
-
-	if err := p.Set("KeyName", "Value"); err != nil {
-		t.Errorf("failed to set key: %v", err)
-	}
-
-	if err := p.Set("KeyName2", "Value"); err != nil {
-		t.Errorf("failed to set key: %v", err)
-	}
-
-	assetCacheFileExists(t, "CacheName", "single_full_cache")
-	assetCacheFileNotExists(t, "CacheName", "KeyName")
-	assetCacheFileNotExists(t, "CacheName", "KeyName2")
-}
-
-func Test_SaveToDiskSingleFile(t *testing.T) {
-	t.Cleanup(ClearTestAssets)
-
-	p := pstore.New(TEST_ASSETS_PATH, "CacheName")
-	p.SingleCacheFile = true
-	p.SaveToDiskOnSet = false
-
-	if err := p.Set("KeyName", "Value"); err != nil {
-		t.Errorf("failed to set key: %v", err)
-	}
-
-	if err := p.Set("KeyName2", "Value"); err != nil {
-		t.Errorf("failed to set key: %v", err)
-	}
-
-	assetCacheFileNotExists(t, "CacheName", "KeyName")
-	assetCacheFileNotExists(t, "CacheName", "KeyName2")
-	assetCacheFileNotExists(t, "CacheName", "single_full_cache")
-
-	if err := p.SaveToDisk(); err != nil {
-		t.Errorf("failed to save to disk: %v", err)
-	}
-
-	assetCacheFileExists(t, "CacheName", "single_full_cache")
-	assetCacheFileNotExists(t, "CacheName", "KeyName")
-	assetCacheFileNotExists(t, "CacheName", "KeyName2")
 }
 
 func ClearTestAssets() {

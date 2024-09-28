@@ -30,8 +30,6 @@ type PersistentStorage struct {
 	ThreadSafe bool
 	// If true, the cache will be saved to disk when a key is set. Default is true.
 	SaveToDiskOnSet bool
-	// If true, the cache will be saved to disk when the cache is saved. Default is false.
-	SingleCacheFile bool
 
 	path     string
 	name     string
@@ -80,12 +78,40 @@ func NewInMemory(name string) *PersistentStorage {
 	}
 }
 
-// Returns the number of items in the cache. Only the in-memory cache is counted.
+const error_read_files_failed = "failed to read files"
+
+func IsReadFilesFailed(err error) bool {
+	return IsPStoreError(err) && strings.Contains(err.Error(), error_read_files_failed)
+}
+
+// Returns the number of items in the storage. All items are counted, including those on disk.
 //
 // Returns:
-//   - The number of items in the cache.
-func (ps *PersistentStorage) Len() int {
-	return len(ps.cache)
+//   - The number of items in the storage.
+//   - An error if files could not be read.
+func (ps *PersistentStorage) Len() (int, error) {
+	if ps.ThreadSafe {
+		ps.mutex.Lock()
+		defer ps.mutex.Unlock()
+	}
+
+	files, err := os.ReadDir(ps.path)
+	if err != nil {
+		return -1, ps.errorf("%s: %v", error_read_files_failed, err)
+	}
+
+	count := 0
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		if strings.HasPrefix(file.Name(), ps.name+"_") && strings.HasSuffix(file.Name(), cache_ext) {
+			count++
+		}
+	}
+
+	return count, nil
 }
 
 const error_delete_failed = "failed to delete"
@@ -105,10 +131,12 @@ func IsDeleteFailed(err error) bool {
 func (ps *PersistentStorage) Delete(key string) error {
 	delete(ps.cache, key)
 
-	if !ps.inMemory {
-		if err := os.RemoveAll(ps.getCachePath(key)); err != nil {
-			return ps.errorf("%s %v: %v", error_delete_failed, key, err)
-		}
+	if ps.inMemory {
+		return nil
+	}
+
+	if err := os.RemoveAll(ps.getCachePath(key)); err != nil {
+		return ps.errorf("%s %v: %v", error_delete_failed, key, err)
 	}
 
 	return nil
@@ -121,33 +149,66 @@ func (ps *PersistentStorage) Delete(key string) error {
 //
 // Returns:
 //   - True if the key exists in the cache.
-func (ps *PersistentStorage) Has(key string) bool {
+//   - An error if the key could not be checked.
+func (ps *PersistentStorage) Has(key string) (bool, error) {
 	if ps.ThreadSafe {
 		ps.mutex.Lock()
 		defer ps.mutex.Unlock()
 	}
 
 	_, ok := ps.cache[key]
-	return ok
+
+	if ok {
+		return true, nil
+	}
+
+	files, err := os.ReadDir(ps.path)
+	if err != nil {
+		return false, ps.errorf("%s: %v", error_read_files_failed, err)
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		if ps.getCacheFilename(key) == file.Name() {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // Keys returns a list of all keys in the cache. Only the in-memory cache is counted. The keys are not sorted and the order is not guaranteed.
 //
 // Returns:
 //   - A list of all keys in the cache.
-func (ps *PersistentStorage) Keys() []string {
+//   - An error if the keys could not be retrieved.
+func (ps *PersistentStorage) Keys() ([]string, error) {
 	if ps.ThreadSafe {
 		ps.mutex.Lock()
 		defer ps.mutex.Unlock()
 	}
 
-	keys := make([]string, 0, len(ps.cache))
+	keys := []string{}
 
-	for k := range ps.cache {
-		keys = append(keys, k)
+	files, err := os.ReadDir(ps.path)
+	if err != nil {
+		return nil, ps.errorf("%s: %v", error_read_files_failed, err)
 	}
 
-	return keys
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		if strings.HasPrefix(file.Name(), ps.name+"_") && strings.HasSuffix(file.Name(), cache_ext) {
+			keys = append(keys, strings.TrimSuffix(strings.TrimPrefix(file.Name(), ps.name+"_"), cache_ext))
+		}
+	}
+
+	return keys, nil
 }
 
 // SaveToDisk saves the cache to disk. If SingleCacheFile is true, all keys are saved to a single file. Otherwise, each key is saved to a separate file. If SaveToDiskOnSet is true, the cache is saved to disk when a key is set and this method does nothing.
@@ -162,10 +223,6 @@ func (ps *PersistentStorage) SaveToDisk() error {
 	if ps.ThreadSafe {
 		ps.mutex.Lock()
 		defer ps.mutex.Lock()
-	}
-
-	if ps.SingleCacheFile {
-		return ps.saveToDisk(single_cache_filename, nil)
 	}
 
 	for k, v := range ps.cache {
@@ -197,8 +254,12 @@ func (ps *PersistentStorage) set(key string, value any) error {
 
 const cache_ext = ".pcache"
 
+func (ps *PersistentStorage) getCacheFilename(key string) string {
+	return ps.name + "_" + key + cache_ext
+}
+
 func (ps *PersistentStorage) getCachePath(key string) string {
-	return path.Join(ps.path, ps.name+"_"+key+cache_ext)
+	return path.Join(ps.path, ps.getCacheFilename(key))
 }
 
 const error_save_to_disk_failed = "failed to save"
@@ -224,19 +285,6 @@ func (ps *PersistentStorage) saveToDisk(key string, value any) error {
 
 	if err := os.MkdirAll(ps.path, 0755); err != nil {
 		return ps.errorf("%s %v: %v", error_save_to_disk_failed, key, err)
-	}
-
-	if ps.SingleCacheFile {
-		cacheBytes, err := serialize(ps.cache)
-		if err != nil {
-			return ps.errorf("%s %v: %v", error_serialize_failed, single_cache_filename, err)
-		}
-
-		if err := os.WriteFile(ps.getCachePath(single_cache_filename), cacheBytes, 0644); err != nil {
-			return ps.errorf("%s %v: %v", error_save_to_disk_failed, single_cache_filename, err)
-		}
-
-		return nil
 	}
 
 	bytes, err := serialize(value)
