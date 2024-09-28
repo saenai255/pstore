@@ -40,7 +40,6 @@ Configure options after initialization to customize the behavior of `PersistentS
 - **MaxMemItems**: Set the maximum number of items to be stored in memory (default: 100). Use `pstore.MEM_ITEMS_UNLIMITED` for unlimited items.
 - **ThreadSafe**: Enable thread-safe access for concurrent operations.
 - **SaveToDiskOnSet**: Control whether data is automatically saved to disk when a key is set (default: `true`).
-- **SingleCacheFile**: Store all key-value pairs in a single file when saving to disk (default: `false`).
 
 ```go
 ps := pstore.New("/path/to/storage", "cache_name")
@@ -49,7 +48,6 @@ ps := pstore.New("/path/to/storage", "cache_name")
 ps.MaxMemItems = pstore.MemoryItemsCount(200) // Store up to 200 items in memory
 ps.ThreadSafe = true                          // Enable thread-safe access
 ps.SaveToDiskOnSet = false                    // Save to disk manually
-ps.SingleCacheFile = true                     // Save all items to a single file
 ```
 
 ### Storing and Retrieving Data
@@ -77,14 +75,18 @@ if err != nil {
 
 ### Checking and Deleting Keys
 
-Check if a key exists in the cache:
+Check if a key exists in the cache or on disk:
 
 ```go
-exists := ps.Has("key1")
-fmt.Println("Key exists:", exists)
+exists, err := ps.Has("key1")
+if err != nil {
+    fmt.Println("Error checking key:", err)
+} else {
+    fmt.Println("Key exists:", exists)
+}
 ```
 
-Delete a key from the cache:
+Delete a key from the cache and disk:
 
 ```go
 err := ps.Delete("key1")
@@ -95,23 +97,31 @@ if err != nil {
 
 ### Retrieving Cache Metadata
 
-Get all keys in the cache:
+Get all keys in the cache (from both in-memory and disk):
 
 ```go
-keys := ps.Keys()
-fmt.Println("Cache keys:", keys)
+keys, err := ps.Keys()
+if err != nil {
+    fmt.Println("Error getting keys:", err)
+} else {
+    fmt.Println("Cache keys:", keys)
+}
 ```
 
-Get the number of items in the cache:
+Get the total number of items in the storage (including on disk):
 
 ```go
-count := ps.Len()
-fmt.Println("Cache item count:", count)
+count, err := ps.Len()
+if err != nil {
+    fmt.Println("Error getting length:", err)
+} else {
+    fmt.Println("Cache item count:", count)
+}
 ```
 
 ### Saving and Loading Data
 
-Save the current state of the cache to disk:
+Save the current state of the cache to disk. If `SaveToDiskOnSet` is set to `true`, this is done automatically when setting a key.
 
 ```go
 err := ps.SaveToDisk()
@@ -149,12 +159,19 @@ ps.MaxMemItems = pstore.MEM_ITEMS_UNLIMITED
 ps.ThreadSafe = true
 ```
 
-### Save All Cache Items to a Single File on Disk
+### Create an In-Memory Cache for Testing
+
+Use the `NewInMemory` constructor for an in-memory cache, ideal for testing purposes. This cache does not persist data to disk.
 
 ```go
-ps := pstore.New("/path/to/storage", "single_cache")
+ps := pstore.NewInMemory("test_cache")
 
-ps.SingleCacheFile = true
+// Set a value
+ps.Set("key1", "some_value")
+
+// Get a value
+var value string
+ps.Get("key1", &value)
 ```
 
 ### Customizing Cache Behavior
@@ -164,9 +181,8 @@ Create a persistent storage with a maximum of 50 items in memory and custom disk
 ```go
 ps := pstore.New("/path/to/storage", "my_cache")
 
-ps.MaxMemItems = pstore.MemoryItemsCount(50)
-ps.SaveToDiskOnSet = false
-ps.SingleCacheFile = true
+ps.MaxMemItems = pstore.MemoryItemsCount(50) // Limit to 50 items in memory
+ps.SaveToDiskOnSet = false                   // Save to disk manually
 ```
 
 ## License

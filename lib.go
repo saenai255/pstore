@@ -61,6 +61,13 @@ func New(path, name string) *PersistentStorage {
 
 // NewInMemory creates a new PersistentStorage instance that only stores data in memory.
 //
+// Important Notes:
+//   - The cache will not be saved to disk, thus not persistent.
+//   - The default maximum number of items in memory set to UNLIMITED. Setting it to a value will limit the end up erasing random items when the limit is reached.
+//   - SaveToDisk method is a no-op.
+//   - SaveToDiskOnSet is set to false by default as SaveToDisk is a no-op.
+//   - This constructor only exists for testing purposes and is basically just a glorified map.
+//
 // Parameters:
 //   - name: The name of the cache.
 //
@@ -70,9 +77,9 @@ func NewInMemory(name string) *PersistentStorage {
 	return &PersistentStorage{
 		name:            name,
 		cache:           make(map[string]any),
-		MaxMemItems:     MEM_ITEMS_DEFAULT,
+		MaxMemItems:     MEM_ITEMS_UNLIMITED,
 		inMemory:        true,
-		SaveToDiskOnSet: true,
+		SaveToDiskOnSet: false,
 		ThreadSafe:      false,
 		mutex:           new(sync.Mutex),
 	}
